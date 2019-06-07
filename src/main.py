@@ -1,12 +1,5 @@
-from logging import getLogger
 import requests
 import json
-
-log = getLogger()
-log.setLevel('INFO')
-
-
-QC_URL = 'https://qc.sentinel1.eo.esa.int/api/v1/'
 
 
 def get_orbit(granule, orbit_type):
@@ -22,7 +15,7 @@ def get_orbit(granule, orbit_type):
         'page_size': '1',
     }
 
-    response = requests.get(url=QC_URL, params=params)
+    response = requests.get(url='https://qc.sentinel1.eo.esa.int/api/v1/', params=params)
     response.raise_for_status()
     qc_data = response.json()
 
@@ -34,7 +27,7 @@ def get_orbit(granule, orbit_type):
 
 def lambda_handler(event, context):
     granule = event['queryStringParameters']['granule_name']
-    response_type = event['queryStringParameters'].get('response_type', 'redirect')
+    response_type = event['queryStringParameters'].get('response_type')
 
     orbit = get_orbit(granule, 'AUX_POEORB')
     if not orbit:
@@ -43,7 +36,7 @@ def lambda_handler(event, context):
     if not orbit:
         response = {
             'statusCode': 400,
-            'body': f'No orbit found for granule {granule}',
+            'body': f'No orbit found for {granule}',
         }
     elif response_type == 'json':
         response = {
