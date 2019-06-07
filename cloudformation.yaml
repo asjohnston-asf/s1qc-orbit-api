@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Outputs:
+
+  ApiEndpoint:
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/"
+
+Resources:
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref AWS::StackName
+      Body:
+        openapi: 3.0.1
+        info:
+          title: geospatial-services
+          version: 0.0.1
+        paths:
+          /orbit:
+            get:
+              parameters:
+              - name: granule_name
+                in: query
+                required: true
+              - name: response_type
+                in: query
+                required: false
+              responses:
+                '307':
+                  description: success
+                default:
+                  description: error
+              x-amazon-apigateway-request-validator: parameters-only
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Lambda.Arn}/invocations"
+                contentHandling: CONVERT_TO_TEXT
+                httpMethod: POST
+                passthroughBehvaior: when_no_match
+                responses:
+                  default:
+                    statusCode: 200
+        x-amazon-apigateway-request-validators:
+          parameters-only:
+            validateRequestParameters: true
+            validateRequestBody: false
+
+  DeploymentREPLACE_ME:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref RestApi
+
+  Stage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: v1
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref DeploymentREPLACE_ME
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt Lambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*"
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dlq"
+      MessageRetentionPeriod: 1209600
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}"
+      RetentionInDays: 30
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref AWS::StackName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+          Effect: Allow
+      Policies:
+      - PolicyName: policy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !GetAtt LogGroup.Arn
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt DeadLetterQueue.Arn
+
+  Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref AWS::StackName
+      Code: src/
+      DeadLetterConfig:
+        TargetArn: !GetAtt DeadLetterQueue.Arn
+      Handler: main.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt Role.Arn
+      Runtime: python3.6
+      Timeout: 30
